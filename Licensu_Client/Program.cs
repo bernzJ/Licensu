@@ -22,7 +22,7 @@ namespace Licensu_Client
         }
         public static void LoadMemory(byte[] data)
         {
-            
+            // do stuff with the bytes
         }
         private static void INotifAuth_StaticPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
