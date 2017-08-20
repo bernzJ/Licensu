@@ -104,7 +104,7 @@ namespace Licensu
             File.AppendAllText(miscPath + logFile, log + Environment.NewLine);
         }
     }
-    public abstract class iNotifAuth
+    public static class iNotifAuth
     {
         public static Action<byte[]> remoteVariable { get; set; }
         public static event EventHandler<PropertyChangedEventArgs> StaticPropertyChanged = delegate { };
@@ -131,15 +131,17 @@ namespace Licensu
             public string certificateName { get; set; }
             public SecureString certificatePassword { get; set; }
             public string certificateFileExtension { get; set; }
-            public string Thumbprint { get; set; }
+            private string thumbprint;
+            public string Thumbprint { get { return thumbprint; } set { thumbprint = Regex.Replace(value, @"[^\da-zA-z]", string.Empty).ToUpper(); } }
             public bool isSSLAuth { get; set; }
         }
 
         public List<CertificateObject> certificateObjects { get; set; }
 
-      
+
         private TcpClient client { get; set; }
         private SslStream sslStream { get; set; }
+        private Task currentTask { get; set; }
         private enum EnumAnswers
         {
             KEY_UPDATE = 232,
@@ -162,13 +164,15 @@ namespace Licensu
 
         public Crypto()
         {
-            certificateObjects = new List<CertificateObject>();
 
         }
-       
+
         private void writeCertificate(CertificateObject certificateObject)
         {
-            File.WriteAllBytes(string.Format("{0}certs\\{1}.{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), certificateObject.data);
+            if (!Directory.Exists(string.Format("{0}certs\\", Debugger.miscPath)))
+                Directory.CreateDirectory(string.Format("{0}certs\\", Debugger.miscPath));
+
+            File.WriteAllBytes(string.Format("{0}certs\\{1}{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), certificateObject.data);
         }
         public bool addToStore()
         {
@@ -184,24 +188,27 @@ namespace Licensu
                 // Save first , do not load directly into memory or tmp file created in user profile
                 foreach (CertificateObject certificateObject in certificateObjects)
                 {
-                    string fullCertPath = string.Format("{0}certs\\{1}.{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension);
+                    string fullCertPath = string.Format("{0}certs\\{1}{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension);
                     bool isOK = true;
-                    while (isOK)
+                    while (isOK != false)
                     {
-                        X509CertificateCollection tmp = new X509CertificateCollection();   
+
                         isOK = File.Exists(fullCertPath);
+                        if (!isOK) break;
                         isOK = computeMD5(certificateObject.data) == computeMD5(fullCertPath);
-                        tmp = store.Certificates.Find(X509FindType.FindByThumbprint, certificateObject.Thumbprint, false);
-                        isOK = (tmp.Count > -1);
+                        if (!isOK) break;
+                        X509Certificate2Collection tmp = store.Certificates.Find(X509FindType.FindByThumbprint, certificateObject.Thumbprint, true);
+                        isOK = (tmp.Count > 0);
+                        if (!isOK) break;
                         if (isOK && certificateObject.isSSLAuth)
                             clientCertificateCollection.Add(tmp[0]);
                         break;
                     }
-                    if(!isOK)
+                    if (!isOK)
                     {
                         writeCertificate(certificateObject);
-                        X509Certificate2 tmp = new X509Certificate2(string.Format("{0}certs\\{1}.{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), (certificateObject.certificatePassword != null) ? certificateObject.certificatePassword : new SecureString());
-                        if(certificateObject.isSSLAuth)
+                        X509Certificate2 tmp = new X509Certificate2(string.Format("{0}certs\\{1}{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), (certificateObject.certificatePassword != null) ? certificateObject.certificatePassword : new SecureString());
+                        if (certificateObject.isSSLAuth)
                             clientCertificateCollection.Add(tmp);
                         store.Add(tmp);
                     }
@@ -221,7 +228,7 @@ namespace Licensu
         {
             return (hwid == null) ? hwid = new HWID().GetHWID() : hwid;
         }
-        public void sslClient(string ServerHostName, int ServerPort, string programID, Task currentTask, CancellationTokenSource cts)
+        public void sslClient(string ServerHostName, int ServerPort, string programID, CancellationTokenSource cts)
         {
             if (client == null) client = new TcpClient();
             client.Connect(ServerHostName, ServerPort);
@@ -240,13 +247,13 @@ namespace Licensu
             // Task of loop
             List<byte> messageBytes = new List<byte>();
 
-            currentTask = Task.Run(async () =>
+            currentTask = Task.Factory.StartNew(() =>
             {
                 int inputBytes = -1;
                 byte[] inputBuffer = new byte[2048];
                 while (inputBytes != 0)
                 {
-                    inputBytes = await sslStream.ReadAsync(inputBuffer, 0, inputBuffer.Length);
+                    inputBytes = sslStream.Read(inputBuffer, 0, inputBuffer.Length);
                     ArraySegment<byte> incomingBuffer = new ArraySegment<byte>(inputBuffer, 0, inputBytes);
                     if (!Enumerable.SequenceEqual(incomingBuffer, outputBuffer))
                         messageBytes.AddRange(incomingBuffer);
@@ -275,12 +282,14 @@ namespace Licensu
         private string computeMD5(string filePath)
         {
             FileStream buffer = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            return computeMD5(new BinaryReader(buffer).ReadBytes((int)buffer.Length));
+            string md5 = computeMD5(new BinaryReader(buffer).ReadBytes((int)buffer.Length));
+            buffer.Close();
+            return md5;
         }
         // This can be emulated.
         private string computeMD5(byte[] data)
         {
-            
+
             using (var cryptoProvider = new SHA1CryptoServiceProvider())
                 return BitConverter
                         .ToString(cryptoProvider.ComputeHash(data));
@@ -411,22 +420,21 @@ namespace Licensu
 
         public Core(string key, List<Crypto.CertificateObject> certificates, string ProgramID)
         {
-           
-            if(certificates == null)
+
+            if (certificates == null)
                 throw new Exception("Certificates object cannot be null !");
 
             if (key == null || key == string.Empty)
                 throw new Exception("Key cannot be null !");
-            
+
             if (cts == null)
                 cts = new CancellationTokenSource();
 
             programID = ProgramID;
-
-          
-
             if (crypto == null)
                 crypto = new Crypto();
+
+            crypto.certificateObjects = certificates;
             if (!crypto.addToStore())
             {
                 Debugger.WriteLog("Failed to add certificates into trusted, Please run this application as administrator.");
@@ -441,8 +449,14 @@ namespace Licensu
             // init ssl client
             if (currentTask != null && currentTask.Status == TaskStatus.Running)
                 return;
+
+
             //client.Connect(ServerHostName, ServerPort);
-            crypto.sslClient("127.0.0.1", 8000, programID, currentTask, cts);
+            currentTask = Task.Factory.StartNew(() =>
+            {
+                crypto.sslClient("127.0.0.1", 8000, programID, cts);
+            });
+
         }
         public void Abort()
         {
