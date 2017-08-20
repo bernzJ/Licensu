@@ -7,6 +7,7 @@ using System.Management;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -19,7 +20,7 @@ using System.Web.Script.Serialization;
 namespace Licensu
 {
 
-    class HWID
+    public class HWID
     {
         bool IsServer { get; set; }
         string BIOS { get; set; }
@@ -89,15 +90,13 @@ namespace Licensu
     }
     public static class Debugger
     {
-        public static bool traceAll = false;
-        public static bool consoleDebug = true;
+        public static bool consoleDebug = false;
         public static string miscPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\licensu\\";
         private static string logFile = "trace.log";
         public static void WriteLog(string log)
         {
             if (consoleDebug)
                 Console.WriteLine(log);
-            if (!traceAll) return;
             if (!Directory.Exists(miscPath))
                 Directory.CreateDirectory(miscPath);
             if (!File.Exists(miscPath + logFile))
@@ -105,7 +104,7 @@ namespace Licensu
             File.AppendAllText(miscPath + logFile, log + Environment.NewLine);
         }
     }
-    abstract class iNotifAuth
+    public abstract class iNotifAuth
     {
         public static Action<byte[]> remoteVariable { get; set; }
         public static event EventHandler<PropertyChangedEventArgs> StaticPropertyChanged = delegate { };
@@ -124,13 +123,21 @@ namespace Licensu
             }
         }
     }
-    class Crypto
+    public class Crypto
     {
-        //cert paths
-        public static string ClientCertificateFile { get; set; }
-        public static string CACertificateFile { get; set; }
+        public class CertificateObject
+        {
+            public byte[] data { get; set; }
+            public string certificateName { get; set; }
+            public SecureString certificatePassword { get; set; }
+            public string certificateFileExtension { get; set; }
+            public string Thumbprint { get; set; }
+            public bool isSSLAuth { get; set; }
+        }
 
-        private readonly string ClientCertificatePassword = "testclient"; //"test2";
+        public List<CertificateObject> certificateObjects { get; set; }
+
+      
         private TcpClient client { get; set; }
         private SslStream sslStream { get; set; }
         private enum EnumAnswers
@@ -155,50 +162,52 @@ namespace Licensu
 
         public Crypto()
         {
-
+            certificateObjects = new List<CertificateObject>();
 
         }
-        private void importCertificate()
+       
+        private void writeCertificate(CertificateObject certificateObject)
         {
-            foreach (X509Certificate2 cert in clientCertificateCollection)
-            {
-                if (cert.Thumbprint != "03A52E361DDEB731C3955EC926F459501CE665ED")
-                    clientCertificateCollection.Remove(cert);
-            }
+            File.WriteAllBytes(string.Format("{0}certs\\{1}.{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), certificateObject.data);
         }
-        public bool addCertificates()
+        public bool addToStore()
         {
             try
             {
+                if (clientCertificateCollection == null)
+                    clientCertificateCollection = new X509CertificateCollection();
+
                 X509Store store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
                 store.Open(OpenFlags.ReadWrite);
-                clientCertificateCollection = store.Certificates.Find(X509FindType.FindByIssuerName, "127.0.0.1", false);
-                if (clientCertificateCollection.Count >= 2)
+
+
+                // Save first , do not load directly into memory or tmp file created in user profile
+                foreach (CertificateObject certificateObject in certificateObjects)
                 {
-                    bool[] found = { false, false };
-                    foreach (X509Certificate2 cert in clientCertificateCollection)
+                    string fullCertPath = string.Format("{0}certs\\{1}.{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension);
+                    bool isOK = true;
+                    while (isOK)
                     {
-                        if (cert.Thumbprint == "03A52E361DDEB731C3955EC926F459501CE665ED")
-                            found[0] = true;
-                        if (cert.Thumbprint == "A068FD4C9523DDDEE87F5B3985DE69FB63FB186E")
-                            found[1] = true;
+                        X509CertificateCollection tmp = new X509CertificateCollection();   
+                        isOK = File.Exists(fullCertPath);
+                        isOK = computeMD5(certificateObject.data) == computeMD5(fullCertPath);
+                        tmp = store.Certificates.Find(X509FindType.FindByThumbprint, certificateObject.Thumbprint, false);
+                        isOK = (tmp.Count > -1);
+                        if (isOK && certificateObject.isSSLAuth)
+                            clientCertificateCollection.Add(tmp[0]);
+                        break;
                     }
-                    if (found[0] && found[1])
+                    if(!isOK)
                     {
-                        importCertificate();
-                        return true;
+                        writeCertificate(certificateObject);
+                        X509Certificate2 tmp = new X509Certificate2(string.Format("{0}certs\\{1}.{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), (certificateObject.certificatePassword != null) ? certificateObject.certificatePassword : new SecureString());
+                        if(certificateObject.isSSLAuth)
+                            clientCertificateCollection.Add(tmp);
+                        store.Add(tmp);
                     }
 
                 }
-                clientCertificateCollection.Add(new X509Certificate2(CACertificateFile));
-                clientCertificateCollection.Add(new X509Certificate2(ClientCertificateFile, ClientCertificatePassword));
-                foreach (X509Certificate2 cer in clientCertificateCollection)
-                {
-                    //add to the appropriate store
-                    store.Add(cer);
-                }
                 store.Close();
-                importCertificate();
                 return true;
             }
             catch (Exception ex)
@@ -262,17 +271,23 @@ namespace Licensu
                 }
             });
         }
-        // This can be emulated.
-        private string computeMD5()
+
+        private string computeMD5(string filePath)
         {
-            FileStream buffer = File.Open(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName, FileMode.Open, FileAccess.Read, FileShare.Read);
+            FileStream buffer = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return computeMD5(new BinaryReader(buffer).ReadBytes((int)buffer.Length));
+        }
+        // This can be emulated.
+        private string computeMD5(byte[] data)
+        {
+            
             using (var cryptoProvider = new SHA1CryptoServiceProvider())
                 return BitConverter
-                        .ToString(cryptoProvider.ComputeHash(buffer));
+                        .ToString(cryptoProvider.ComputeHash(data));
         }
         private byte[] buildClientPacket(string programID)
         {
-            string md5 = computeMD5();
+            string md5 = computeMD5(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
             string version = ((AssemblyFileVersionAttribute)Attribute.GetCustomAttribute(Assembly.GetExecutingAssembly(), typeof(AssemblyFileVersionAttribute), false)).Version;
             string shwid = getHWID();
             string paramJson = string.Format("{{\"MD5\":\"{0}\",\"VERSION\":\"{1}\",\"HWID\":\"{2}\",\"PID\":\"{3}\"}}", md5, version, shwid, programID);
@@ -383,7 +398,7 @@ namespace Licensu
         }
 
     }
-    class Core
+    public class Core
     {
         public Action<byte[]> remoteVariable { get; set; }
         public string programID { get; set; }
@@ -394,13 +409,12 @@ namespace Licensu
         // can be bound from wpf
 
 
-        public Core(string key, string clientCertPath, string caCertPath, string ProgramID)
+        public Core(string key, List<Crypto.CertificateObject> certificates, string ProgramID)
         {
-            // Checks
-            if (!File.Exists(clientCertPath))
-                throw new Exception("Invalid client certificate path !");
-            if (!File.Exists(caCertPath))
-                throw new Exception("Invalid ca certificate path !");
+           
+            if(certificates == null)
+                throw new Exception("Certificates object cannot be null !");
+
             if (key == null || key == string.Empty)
                 throw new Exception("Key cannot be null !");
             
@@ -409,12 +423,11 @@ namespace Licensu
 
             programID = ProgramID;
 
-            Crypto.ClientCertificateFile = clientCertPath;
-            Crypto.CACertificateFile = caCertPath;
+          
 
             if (crypto == null)
                 crypto = new Crypto();
-            if (!crypto.addCertificates())
+            if (!crypto.addToStore())
             {
                 Debugger.WriteLog("Failed to add certificates into trusted, Please run this application as administrator.");
                 return;
