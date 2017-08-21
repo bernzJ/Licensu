@@ -402,6 +402,9 @@ namespace Licensu
                     case (int)EnumAnswers.UPDATE:
                         iNotifAuth.Status = "Update avaible, this isn't implemented !";
                         break;
+                    case (int)EnumAnswers.DONE_PROCESSING:
+                        iNotifAuth.Status = "Done";
+                        break;
                 }
             }
         }
@@ -434,6 +437,7 @@ namespace Licensu
             if (crypto == null)
                 crypto = new Crypto();
 
+            crypto.key = key;
             crypto.certificateObjects = certificates;
             if (!crypto.addToStore())
             {
