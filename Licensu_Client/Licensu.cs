@@ -106,7 +106,7 @@ namespace Licensu
     }
     public static class iNotifAuth
     {
-        public static Action<byte[]> remoteVariable { get; set; }
+        public static Action<dynamic> remoteVariable { get; set; }
         public static event EventHandler<PropertyChangedEventArgs> StaticPropertyChanged = delegate { };
         private static void NotifyStaticPropertyChanged(string propertyName)
         {
@@ -404,7 +404,7 @@ namespace Licensu
                     case (int)EnumAnswers.PLUGIN_DATA:
                         if (iNotifAuth.remoteVariable == null)
                             throw new Exception("You have remote variable data but haven't set your call back !");
-                        iNotifAuth.remoteVariable(Convert.FromBase64String(serverPacket["data"]));
+                        iNotifAuth.remoteVariable(serverPacket["data"]);
                         iNotifAuth.Status = "Downloading data ..";
                         break;
                     case (int)EnumAnswers.UPDATE:
@@ -420,14 +420,12 @@ namespace Licensu
     }
     public class Core
     {
-        public Action<byte[]> remoteVariable { get; set; }
+        public Action<dynamic> remoteVariable { get; set; }
         public string programID { get; set; }
 
         private Crypto crypto { get; set; }
         private Task currentTask { get; set; }
         private CancellationTokenSource cts { get; set; }
-        // can be bound from wpf
-
 
         public Core(string key, List<Crypto.CertificateObject> certificates, string ProgramID)
         {

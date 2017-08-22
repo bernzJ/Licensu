@@ -34,7 +34,7 @@ namespace Licensu_Client
             
             Console.ReadLine();
         }
-        public static void LoadMemory(byte[] data)
+        public static void LoadMemory(dynamic data)
         {
             // do stuff with the bytes
         }
