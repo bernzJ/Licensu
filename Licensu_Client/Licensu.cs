@@ -158,7 +158,7 @@ namespace Licensu
         }
 
 
-        public X509CertificateCollection clientCertificateCollection { get; set; }
+        public X509Certificate2Collection clientCertificateCollection { get; set; }
         public string hwid { get; set; }
         public string key { get; set; }
 
@@ -179,7 +179,7 @@ namespace Licensu
             try
             {
                 if (clientCertificateCollection == null)
-                    clientCertificateCollection = new X509CertificateCollection();
+                    clientCertificateCollection = new X509Certificate2Collection();
 
                 X509Store store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
                 store.Open(OpenFlags.ReadWrite);
@@ -207,13 +207,14 @@ namespace Licensu
                     if (!isOK)
                     {
                         writeCertificate(certificateObject);
-                        X509Certificate2 tmp = new X509Certificate2(string.Format("{0}certs\\{1}{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), (certificateObject.certificatePassword != null) ? certificateObject.certificatePassword : new SecureString());
+                        X509Certificate2 tmp = new X509Certificate2(string.Format("{0}certs\\{1}{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), (certificateObject.certificatePassword != null) ? certificateObject.certificatePassword : new SecureString(), X509KeyStorageFlags.Exportable);
                         if (certificateObject.isSSLAuth)
                             clientCertificateCollection.Add(tmp);
                         store.Add(tmp);
                     }
 
                 }
+                
                 store.Close();
                 return true;
             }
