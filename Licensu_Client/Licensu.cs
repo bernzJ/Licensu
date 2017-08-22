@@ -231,53 +231,60 @@ namespace Licensu
         }
         public void sslClient(string ServerHostName, int ServerPort, string programID, CancellationTokenSource cts)
         {
-            if (client == null) client = new TcpClient();
-            client.Connect(ServerHostName, ServerPort);
-            if (sslStream == null) sslStream = new SslStream(client.GetStream(), false, App_CertificateValidation, SelectLocalCertificate);
-            sslStream.AuthenticateAsClient(ServerHostName, clientCertificateCollection, SslProtocols.Tls12, true);
-
-            Debugger.WriteLog("SSL authentication completed.");
-            Debugger.WriteLog(string.Format("SSL using local certificate {0}.", sslStream.LocalCertificate.Subject));
-            Debugger.WriteLog(string.Format("SSL using remote certificate {0}.", sslStream.RemoteCertificate.Subject));
-
-            // Send handshake
-            byte[] outputBuffer = buildClientPacket(programID);
-            sslStream.Write(outputBuffer);
-            sslStream.Flush();
-
-            // Task of loop
-            List<byte> messageBytes = new List<byte>();
-
-            currentTask = Task.Factory.StartNew(() =>
+            try
             {
-                int inputBytes = -1;
-                byte[] inputBuffer = new byte[2048];
-                while (inputBytes != 0)
+                if (client == null) client = new TcpClient();
+                client.Connect(ServerHostName, ServerPort);
+                if (sslStream == null) sslStream = new SslStream(client.GetStream(), false, App_CertificateValidation, SelectLocalCertificate);
+                sslStream.AuthenticateAsClient(ServerHostName, clientCertificateCollection, SslProtocols.Tls12, true);
+
+                Debugger.WriteLog("SSL authentication completed.");
+                Debugger.WriteLog(string.Format("SSL using local certificate {0}.", sslStream.LocalCertificate.Subject));
+                Debugger.WriteLog(string.Format("SSL using remote certificate {0}.", sslStream.RemoteCertificate.Subject));
+
+                // Send handshake
+                byte[] outputBuffer = buildClientPacket(programID);
+                sslStream.Write(outputBuffer);
+                sslStream.Flush();
+
+                // Task of loop
+                List<byte> messageBytes = new List<byte>();
+
+                currentTask = Task.Factory.StartNew(() =>
                 {
-                    inputBytes = sslStream.Read(inputBuffer, 0, inputBuffer.Length);
-                    ArraySegment<byte> incomingBuffer = new ArraySegment<byte>(inputBuffer, 0, inputBytes);
-                    if (!Enumerable.SequenceEqual(incomingBuffer, outputBuffer))
-                        messageBytes.AddRange(incomingBuffer);
-                }
-            }, cts.Token).ContinueWith(task =>
-            {
+                    int inputBytes = -1;
+                    byte[] inputBuffer = new byte[2048];
+                    while (inputBytes != 0)
+                    {
+                        inputBytes = sslStream.Read(inputBuffer, 0, inputBuffer.Length);
+                        ArraySegment<byte> incomingBuffer = new ArraySegment<byte>(inputBuffer, 0, inputBytes);
+                        if (!Enumerable.SequenceEqual(incomingBuffer, outputBuffer))
+                            messageBytes.AddRange(incomingBuffer);
+                    }
+                }, cts.Token).ContinueWith(task =>
+                {
                 // do treat the data
                 processMessage(Encoding.UTF8.GetString(messageBytes.ToArray()));
 
-                switch (task.Status)
-                {
+                    switch (task.Status)
+                    {
                     // Handle any exceptions to prevent UnobservedTaskException.
                     case TaskStatus.Canceled:
-                        Debugger.WriteLog("TASK GOT CANCELLED");
-                        break;
-                    case TaskStatus.Faulted:
-                        Debugger.WriteLog(task.Exception.Message);
-                        break;
-                    case TaskStatus.RanToCompletion:
-                        Debugger.WriteLog("TASK FINISHED ?!");
-                        break;
-                }
-            });
+                            Debugger.WriteLog("TASK GOT CANCELLED");
+                            break;
+                        case TaskStatus.Faulted:
+                            Debugger.WriteLog(task.Exception.Message);
+                            break;
+                        case TaskStatus.RanToCompletion:
+                            Debugger.WriteLog("TASK FINISHED ?!");
+                            break;
+                    }
+                });
+            }
+            catch(Exception Ex)
+            {
+                iNotifAuth.Status = Ex.Message;
+            }
         }
 
         private string computeMD5(string filePath)
