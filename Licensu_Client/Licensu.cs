@@ -207,14 +207,14 @@ namespace Licensu
                     if (!isOK)
                     {
                         writeCertificate(certificateObject);
-                        X509Certificate2 tmp = new X509Certificate2(string.Format("{0}certs\\{1}{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), (certificateObject.certificatePassword != null) ? certificateObject.certificatePassword : new SecureString(), X509KeyStorageFlags.Exportable);
+                        X509Certificate2 tmp = new X509Certificate2(string.Format("{0}certs\\{1}{2}", Debugger.miscPath, certificateObject.certificateName, certificateObject.certificateFileExtension), (certificateObject.certificatePassword != null) ? certificateObject.certificatePassword : new SecureString(), X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable);
                         if (certificateObject.isSSLAuth)
                             clientCertificateCollection.Add(tmp);
                         store.Add(tmp);
                     }
 
                 }
-                
+
                 store.Close();
                 return true;
             }
@@ -263,13 +263,13 @@ namespace Licensu
                     }
                 }, cts.Token).ContinueWith(task =>
                 {
-                // do treat the data
-                processMessage(Encoding.UTF8.GetString(messageBytes.ToArray()));
+                    // do treat the data
+                    processMessage(Encoding.UTF8.GetString(messageBytes.ToArray()));
 
                     switch (task.Status)
                     {
-                    // Handle any exceptions to prevent UnobservedTaskException.
-                    case TaskStatus.Canceled:
+                        // Handle any exceptions to prevent UnobservedTaskException.
+                        case TaskStatus.Canceled:
                             Debugger.WriteLog("TASK GOT CANCELLED");
                             break;
                         case TaskStatus.Faulted:
@@ -281,7 +281,7 @@ namespace Licensu
                     }
                 });
             }
-            catch(Exception Ex)
+            catch (Exception Ex)
             {
                 iNotifAuth.Status = Ex.Message;
             }
@@ -375,13 +375,15 @@ namespace Licensu
         }
         private void processMessage(string message)
         {
-
             JavaScriptSerializer js = new JavaScriptSerializer();
-            Regex regex = new Regex("{.*?}");
-            MatchCollection matches = regex.Matches(message);
-            foreach (Match match in matches)
+            //Regex regex = new Regex("{.*?}");
+            // MatchCollection matches = regex.Matches(message);
+            string[] matches = message.Split('\n');
+            foreach (string match in matches)
             {
-                dynamic serverPacket = (js.Deserialize<dynamic>(match.Value));
+                // invalid json
+                if (!match.Contains("{")) continue;
+                dynamic serverPacket = (js.Deserialize<dynamic>(match));
                 int status = int.Parse(serverPacket["status"], System.Globalization.NumberStyles.HexNumber);
                 switch (status)
                 {
@@ -408,7 +410,7 @@ namespace Licensu
                         iNotifAuth.Status = "Downloading data ..";
                         break;
                     case (int)EnumAnswers.UPDATE:
-                        iNotifAuth.Status = "Update avaible, this isn't implemented !";
+                        iNotifAuth.Status = "Update avaible, please contact support/admin for the new file !";
                         break;
                     case (int)EnumAnswers.DONE_PROCESSING:
                         iNotifAuth.Status = "Done";
@@ -464,7 +466,7 @@ namespace Licensu
             //client.Connect(ServerHostName, ServerPort);
             currentTask = Task.Factory.StartNew(() =>
             {
-                crypto.sslClient("127.0.0.1", 8000, programID, cts);
+                crypto.sslClient("127.0.0.1", 6969, programID, cts);
             });
 
         }
